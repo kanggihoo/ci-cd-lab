@@ -78,7 +78,7 @@ func newServer(db *sql.DB) http.Handler {
 		var in struct {
 			Body string `json:"body"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil || in.Body == "" {
 			http.Error(w, "body required", http.StatusBadRequest)
 			return
 		}
