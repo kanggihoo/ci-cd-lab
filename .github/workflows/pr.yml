@@ -72,6 +72,17 @@ jobs:
           persist-credentials: false
       - name: build (no push)
         run: docker build --build-arg COMMIT="$GITHUB_SHA" -t be:pr be
+      # D-3: 빌드 인자로 넣은 commit이 실행 파일을 거쳐 /api/version 응답까지 오는지 본다.
+      - name: version contract
+        run: |
+          docker run -d --name be -p 127.0.0.1:8080:8080 be:pr
+          for _ in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:8080/api/version > version.json && break
+            sleep 0.5
+          done
+          echo "expected commit: $GITHUB_SHA"
+          echo "api response:    $(cat version.json)"
+          jq -e --arg c "$GITHUB_SHA" '.commit == $c' version.json > /dev/null
 
   # ruleset이 필수로 요구하는 체크는 이 job 하나다(D-5).
   # if: always()가 없으면 앞 job이 실패할 때 gate가 "건너뜀"이 되고,
