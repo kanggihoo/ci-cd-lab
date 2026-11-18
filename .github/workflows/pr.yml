@@ -76,4 +76,4 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          exit 0  # break(2): 판정을 지움 (일부러 깨뜨리기, D-16)
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
