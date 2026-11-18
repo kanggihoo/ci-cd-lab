@@ -62,12 +62,23 @@ jobs:
           tar -xzf actionlint.tgz actionlint
       - run: ./actionlint -color
 
+  # Dockerfile이 빌드되는지만 본다. push하지 않는다(게시는 main 전용 workflow, D-8).
+  be-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: build (no push)
+        run: docker build --build-arg COMMIT="$GITHUB_SHA" -t be:pr be
+
   # ruleset이 필수로 요구하는 체크는 이 job 하나다(D-5).
   # if: always()가 없으면 앞 job이 실패할 때 gate가 "건너뜀"이 되고,
   # 필수 체크가 건너뜀이면 GitHub은 통과로 취급한다.
   gate:
     if: always()
-    needs: [go-test, actionlint]
+    needs: [go-test, actionlint, be-image]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
