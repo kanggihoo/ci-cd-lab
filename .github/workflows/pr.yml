@@ -1,0 +1,79 @@
+# PR 검사(단계 1). 시크릿을 쓰지 않고 읽기 권한만 가진다(D-5, D-8).
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        # D-7: 이미지는 digest로 고정한다(postgres:17-alpine).
+        image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+        env:
+          POSTGRES_PASSWORD: test  # 러너 안에서만 쓰는 일회용 값이라 비밀이 아니다.
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: be/go.mod
+          cache-dependency-path: be/go.sum
+      - name: vet and test
+        working-directory: be
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
+        run: |
+          go vet ./...
+          go test -count=1 -v ./...
+
+  actionlint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install actionlint (checksum verified)
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -fsSLo actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tgz" | sha256sum -c -
+          tar -xzf actionlint.tgz actionlint
+      - run: ./actionlint -color
+
+  # ruleset이 필수로 요구하는 체크는 이 job 하나다(D-5).
+  # if: always()가 없으면 앞 job이 실패할 때 gate가 "건너뜀"이 되고,
+  # 필수 체크가 건너뜀이면 GitHub은 통과로 취급한다.
+  gate:
+    if: always()
+    needs: [go-test, actionlint]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: all needed jobs must be success
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
