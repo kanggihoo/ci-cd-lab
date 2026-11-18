@@ -1,0 +1,75 @@
+# 이미지 게시(단계 2). main에 push될 때만 돈다(D-8).
+# PR 검사(pr.yml)와 파일을 나눠, PR 쪽에는 쓰기 권한과 게시 단계가 없게 한다.
+name: publish
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 같은 commit의 게시가 겹쳐 돌지 않게 한다. 진행 중인 게시는 취소하지 않는다.
+concurrency:
+  group: publish-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  be:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # GHCR에 올리는 이 job에만 packages: write를 준다.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}/be
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: set tag
+        run: echo "TAG=sha-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: login to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      # D-9: 같은 태그가 이미 있으면 게시하지 않고 실패한다.
+      # 레지스트리가 태그 덮어쓰기를 막아 준다고 기대하지 않는다.
+      - name: refuse if tag already exists
+        run: |
+          if out=$(docker manifest inspect "$IMAGE:$TAG" 2>&1); then
+            echo "::error::$IMAGE:$TAG already exists. refusing to overwrite."
+            exit 1
+          fi
+          case "$out" in
+            *"manifest unknown"*|*"not found"*|*"NotFound"*)
+              echo "$IMAGE:$TAG does not exist yet. ok." ;;
+            *)
+              echo "$out"
+              echo "::error::could not determine whether the tag exists."
+              exit 1 ;;
+          esac
+
+      - name: build
+        run: |
+          docker build \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "$IMAGE:$TAG" be
+
+      - name: push and record digest
+        run: |
+          docker push "$IMAGE:$TAG"
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$TAG")
+          echo "pushed: $IMAGE:$TAG"
+          echo "digest: $DIGEST"
+          {
+            echo "### be image"
+            echo "- tag: \`$IMAGE:$TAG\`"
+            echo "- digest: \`$DIGEST\`"
+            echo "- commit: \`$GITHUB_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
