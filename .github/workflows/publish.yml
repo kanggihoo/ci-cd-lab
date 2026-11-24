@@ -19,9 +19,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # GHCR에 올리는 이 job에만 packages: write를 준다.
+    # 출처 증명 서명(OIDC)과 GitHub 저장에는 id-token: write, attestations: write가 필요하다(D-10).
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     env:
       IMAGE: ghcr.io/${{ github.repository }}/be
     steps:
@@ -62,14 +65,25 @@ jobs:
             -t "$IMAGE:$TAG" be
 
       - name: push and record digest
+        id: push
         run: |
           docker push "$IMAGE:$TAG"
-          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$TAG")
+          REPO_DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$TAG")
+          DIGEST=${REPO_DIGEST#*@}
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "pushed: $IMAGE:$TAG"
-          echo "digest: $DIGEST"
+          echo "digest: $REPO_DIGEST"
           {
             echo "### be image"
             echo "- tag: \`$IMAGE:$TAG\`"
-            echo "- digest: \`$DIGEST\`"
+            echo "- digest: \`$REPO_DIGEST\`"
             echo "- commit: \`$GITHUB_SHA\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # D-10: 빌드가 만든 digest에 출처 증명을 서명해 붙인다.
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f7447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
