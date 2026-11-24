@@ -82,7 +82,7 @@ jobs:
 
       # D-10: 빌드가 만든 digest에 출처 증명을 서명해 붙인다.
       - name: attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f7447822ac1eab6504dd8 # v4.2.2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}
